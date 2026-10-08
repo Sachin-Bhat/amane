@@ -142,6 +142,7 @@ fn parse(workspaces: &str, tree: &str) -> Option<Vec<Workspace>> {
         let windows = counts.get(&id).copied().unwrap_or(0);
 
         list.push(Workspace {
+            visible_global: false,
             id,
 
             // the number users see; a workspace with only a name has -1, kept as 0

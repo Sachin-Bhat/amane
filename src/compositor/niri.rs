@@ -167,6 +167,7 @@ fn parse_workspace(value: &Value) -> Option<Workspace> {
     let index = value["idx"].as_u64()?;
 
     let workspace = Workspace {
+        visible_global: false,
         id: value["id"].as_i64()?,
         index: index as u32,
 

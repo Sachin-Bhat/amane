@@ -16,6 +16,9 @@ pub struct Workspace {
 
     // how many windows are on it
     pub(crate) windows: u32,
+
+    // Mango globals are visible even on tags whose own count is zero.
+    pub(crate) visible_global: bool,
 }
 
 impl Workspace {
@@ -48,6 +51,10 @@ impl Workspace {
     }
 
     // 0 for an empty workspace, one that only shows the desktop
+    pub fn visible_global(&self) -> bool {
+        self.visible_global
+    }
+
     pub fn windows(&self) -> u32 {
         self.windows
     }

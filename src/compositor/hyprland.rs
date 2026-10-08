@@ -136,6 +136,7 @@ fn parse(workspaces: &str, monitors: &str) -> Option<Vec<Workspace>> {
         let windows = workspace["windows"].as_u64()?;
 
         list.push(Workspace {
+            visible_global: false,
             id,
 
             /*

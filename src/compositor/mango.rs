@@ -100,12 +100,33 @@ fn monitor_selector(output: &str) -> Option<String> {
     Some(selector)
 }
 
-pub fn listen(on_change: impl FnMut(Vec<Workspace>)) {
+pub fn listen(mut on_change: impl FnMut(Vec<Workspace>)) {
     subscribe(
         || Some(send("watch all-monitors")),
-        on_change,
+        |mut list| {
+            if !list.is_empty() {
+                global_occupancy(&mut list, request("get all-clients").as_deref());
+            }
+            on_change(list);
+        },
         std::thread::sleep,
     );
+}
+
+fn global_occupancy(list: &mut [Workspace], reply: Option<&str>) {
+    let clients = reply
+        .and_then(|reply| serde_json::from_str::<Value>(reply).ok())
+        .and_then(|value| value["clients"].as_array().cloned());
+    for workspace in list {
+        // An unavailable client query conservatively hides desktop-only widgets.
+        workspace.visible_global = clients.as_ref().is_none_or(|clients| {
+            clients.iter().any(|client| {
+                client["monitor"].as_str() == workspace.output.as_deref()
+                    && client["is_global"].as_bool() == Some(true)
+                    && client["is_minimized"].as_bool() != Some(true)
+            })
+        });
+    }
 }
 
 fn subscribe(
@@ -171,6 +192,7 @@ fn parse(line: &str, outputs: &mut Vec<String>) -> Option<Vec<Workspace>> {
             let active = tag["is_active"].as_bool()?;
 
             list.push(Workspace {
+                visible_global: false,
                 id: ((slot as i64) << 32) | i64::from(index),
                 index,
                 name: None,
@@ -202,6 +224,25 @@ mod tests {
             {"index":3,"is_active":false,"is_urgent":false,"layout":"T","client_count":0}
         ]}
     ]}"#;
+
+    #[test]
+    fn visible_global_clients_obscure_empty_tags_without_changing_counts() {
+        let mut list = parse(MONITORS, &mut Vec::new()).unwrap();
+        list[0].windows = 0;
+        global_occupancy(
+            &mut list,
+            Some(
+                r#"{"clients":[{"monitor":"DP-9","is_global":true,"is_minimized":false},{"monitor":"eDP-1","is_global":true,"is_minimized":true}]}"#,
+            ),
+        );
+        assert!(list[0].visible_global());
+        assert_eq!(list[0].windows(), 0);
+        assert!(!list[3].visible_global());
+        global_occupancy(&mut list, None);
+        assert!(list[3].visible_global()); // unavailable occupancy hides desktop widgets
+        global_occupancy(&mut list, Some(r#"{"clients":[]}"#));
+        assert!(!list[0].visible_global());
+    }
 
     #[test]
     fn clears_lost_state_and_reconnects_after_failure_and_eof() {
