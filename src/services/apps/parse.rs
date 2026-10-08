@@ -46,6 +46,7 @@ pub fn read(path: &Path, icons: &HashMap<String, PathBuf>) -> Option<DesktopApp>
     Some(DesktopApp {
         name,
         exec,
+        terminal: is_true(fields.get("Terminal")),
         icon,
         icon_path,
         description,
@@ -94,4 +95,27 @@ fn find_icon(icon: &str, icons: &HashMap<String, PathBuf>) -> Option<PathBuf> {
     }
 
     icons.get(icon).cloned()
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+    #[test]
+    fn keeps_terminal_requirement_for_bottom_launcher() {
+        let path =
+            std::env::temp_dir().join(format!("amane-terminal-{}.desktop", std::process::id()));
+        fs::write(
+            &path,
+            "[Desktop Entry]\nType=Application\nName=bottom\nExec=btm\nTerminal=true\n",
+        )
+        .unwrap();
+        assert!(read(&path, &HashMap::new()).unwrap().terminal());
+        fs::write(
+            &path,
+            "[Desktop Entry]\nType=Application\nName=GUI\nExec=gui\nTerminal=false\n",
+        )
+        .unwrap();
+        assert!(!read(&path, &HashMap::new()).unwrap().terminal());
+        fs::remove_file(path).unwrap();
+    }
 }

@@ -6,6 +6,7 @@ use crate::spawn;
 pub struct DesktopApp {
     pub(crate) name: String,
     pub(crate) exec: String,
+    pub(crate) terminal: bool,
     pub(crate) icon: Option<String>,
     pub(crate) icon_path: Option<PathBuf>,
     pub(crate) description: Option<String>,
@@ -19,6 +20,10 @@ impl DesktopApp {
     // the command line, without the %f style placeholders
     pub fn exec(&self) -> &str {
         &self.exec
+    }
+
+    pub fn terminal(&self) -> bool {
+        self.terminal
     }
 
     // the icon's name in the icon theme, like "firefox"
