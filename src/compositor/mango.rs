@@ -2,6 +2,7 @@ use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -14,18 +15,28 @@ fn send(command: &str) -> Option<UnixStream> {
     let path = env::var_os("MANGO_INSTANCE_SIGNATURE")?;
     let mut stream = UnixStream::connect(path).ok()?;
 
+    stream
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .ok()?;
     stream.write_all(format!("{command}\n").as_bytes()).ok()?;
 
     Some(stream)
 }
 
 fn request(command: &str) -> Option<String> {
-    let stream = send(command)?;
+    reply(send(command)?, Duration::from_secs(3))
+}
+
+fn reply(stream: UnixStream, timeout: Duration) -> Option<String> {
+    stream.set_read_timeout(Some(timeout)).ok()?;
     let mut reply = String::new();
-
     BufReader::new(stream).read_line(&mut reply).ok()?;
-
     Some(reply)
+}
+
+fn succeeded(reply: &str) -> Option<()> {
+    let value: Value = serde_json::from_str(reply).ok()?;
+    (value["success"].as_bool() == Some(true)).then_some(())
 }
 
 pub fn focus_workspace(id: i64) {
@@ -39,7 +50,7 @@ fn focus(id: i64, mut request: impl FnMut(&str) -> Option<String>) -> Option<()>
     let selector = monitor_selector(output)?;
     let command = focus_command(id, &list)?;
 
-    request(&format!("dispatch focusmon,{selector}"))?;
+    succeeded(&request(&format!("dispatch focusmon,{selector}"))?)?;
 
     // disabled outputs remain in snapshots; viewcrossmon would switch the current output instead
     let confirmed: Value = serde_json::from_str(&request("get all-monitors")?).ok()?;
@@ -51,7 +62,7 @@ fn focus(id: i64, mut request: impl FnMut(&str) -> Option<String>) -> Option<()>
         return None;
     }
 
-    request(&command)?;
+    succeeded(&request(&command)?)?;
 
     Some(())
 }
@@ -90,12 +101,29 @@ fn monitor_selector(output: &str) -> Option<String> {
 }
 
 pub fn listen(on_change: impl FnMut(Vec<Workspace>)) {
-    let Some(stream) = send("watch all-monitors") else {
-        return;
-    };
+    subscribe(
+        || Some(send("watch all-monitors")),
+        on_change,
+        std::thread::sleep,
+    );
+}
 
-    // the watch reply is the initial snapshot, followed by a full snapshot on each change
-    events(BufReader::new(stream), on_change);
+fn subscribe(
+    mut connect: impl FnMut() -> Option<Option<UnixStream>>,
+    mut on_change: impl FnMut(Vec<Workspace>),
+    mut sleep: impl FnMut(Duration),
+) {
+    let initial = Duration::from_millis(250);
+    let mut delay = initial;
+    while let Some(connection) = connect() {
+        if let Some(stream) = connection {
+            delay = initial;
+            events(BufReader::new(stream), &mut on_change);
+        }
+        on_change(Vec::new());
+        sleep(delay);
+        delay = (delay * 2).min(Duration::from_secs(5));
+    }
 }
 
 fn events(reader: impl BufRead, mut on_change: impl FnMut(Vec<Workspace>)) {
@@ -174,6 +202,78 @@ mod tests {
             {"index":3,"is_active":false,"is_urgent":false,"layout":"T","client_count":0}
         ]}
     ]}"#;
+
+    #[test]
+    fn clears_lost_state_and_reconnects_after_failure_and_eof() {
+        let mut attempts = 0;
+        let mut updates = Vec::new();
+        let mut delays = Vec::new();
+        subscribe(
+            || {
+                attempts += 1;
+                match attempts {
+                    1 => Some(None),
+                    2 | 3 => {
+                        let (mut server, client) = UnixStream::pair().unwrap();
+                        writeln!(server, "{}", MONITORS.replace('\n', "")).unwrap();
+                        Some(Some(client))
+                    }
+                    _ => None,
+                }
+            },
+            |list| updates.push(list),
+            |delay| delays.push(delay),
+        );
+        assert_eq!(
+            updates.iter().map(Vec::len).collect::<Vec<_>>(),
+            [0, 5, 0, 5, 0]
+        );
+        assert_eq!(delays, [Duration::from_millis(250); 3]);
+    }
+
+    #[test]
+    fn caps_retry_delays_instead_of_spinning_when_socket_is_unavailable() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+        subscribe(
+            || {
+                attempts += 1;
+                (attempts <= 8).then_some(None)
+            },
+            |_| {},
+            |delay| delays.push(delay),
+        );
+        assert_eq!(
+            delays.iter().map(Duration::as_millis).collect::<Vec<_>>(),
+            [250, 500, 1000, 2000, 4000, 5000, 5000, 5000]
+        );
+    }
+
+    #[test]
+    fn stalled_one_shot_reply_returns_instead_of_hanging() {
+        let (_server, client) = UnixStream::pair().unwrap();
+        let start = std::time::Instant::now();
+        assert!(reply(client, Duration::from_millis(30)).is_none());
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn dispatch_errors_do_not_switch_tags() {
+        let list = snapshot(MONITORS).unwrap();
+        let mut commands = Vec::new();
+        assert!(
+            focus(list[1].id, |command| {
+                commands.push(command.to_string());
+                Some(if commands.len() == 1 {
+                    MONITORS.to_string()
+                } else {
+                    r#"{"success":false,"error":"failed"}"#.into()
+                })
+            })
+            .is_none()
+        );
+        assert_eq!(commands.len(), 2);
+    }
 
     #[test]
     fn reads_tags_on_each_monitor() {
