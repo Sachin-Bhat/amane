@@ -38,6 +38,9 @@ pub struct OpenWindow {
 
     pub frame_requested: bool,
 
+    // Rebuild a hidden layer with a fresh role after this event batch completes.
+    pub recreate_hidden: bool,
+
     // when the last frame started drawing, for AMANE_FRAMES
     pub last_frame: Option<Instant>,
 
@@ -82,6 +85,7 @@ pub enum Role {
 }
 
 // what a window runs on every redraw to find out what it shows
+#[derive(Clone)]
 pub enum View {
     Plain(fn() -> LayerWindow),
 

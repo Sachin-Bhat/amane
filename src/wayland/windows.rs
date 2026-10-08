@@ -76,6 +76,7 @@ impl WaylandState {
             scale: 1.0,
 
             frame_requested: false,
+            recreate_hidden: false,
             last_frame: None,
             reads: HashSet::new(),
 
@@ -105,6 +106,23 @@ impl WaylandState {
         }
 
         None
+    }
+
+    pub fn recreate_hidden_layers(&mut self) {
+        let mut index = 0;
+        while index < self.windows.len() {
+            if !self.windows[index].recreate_hidden {
+                index += 1;
+                continue;
+            }
+            let window = self.windows.remove(index);
+            let view = window.view.clone();
+            let output = window.output.clone();
+            // Dropping the old role invalidates its toolkit weak reference, so
+            // queued configures cannot acknowledge serials from before hiding.
+            drop(window);
+            self.open(view, output);
+        }
     }
 
     // a service or handler may have changed what any of the windows shows

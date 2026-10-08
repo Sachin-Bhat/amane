@@ -74,6 +74,8 @@ Read from the kernel (`/proc/meminfo`), every 2 seconds.
 
 ## Brightness
 
+On laptops with more than one backlight device, set `AMANE_BACKLIGHT_DEVICE` to the device name under `/sys/class/backlight`, for example `amdgpu_bl1`. The override applies to both the displayed percentage and `Brightness::set`. An unknown device disables the control; without the override, the first listed backlight is used.
+
 Reads the screen backlight from the kernel (`/sys/class/backlight`).
 
 | Function | Gives |

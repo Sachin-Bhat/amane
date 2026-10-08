@@ -105,17 +105,70 @@ fn write_level(percent: u8) {
     Brightness::write().update();
 }
 
-// the first backlight the kernel lists, a laptop usually has exactly one
+// An explicit device avoids controlling the wrong GPU on multi-backlight laptops.
 fn find() -> Option<PathBuf> {
-    let mut entries = fs::read_dir(BACKLIGHTS).ok()?.flatten();
+    let device = std::env::var_os("AMANE_BACKLIGHT_DEVICE");
+    find_selected(Path::new(BACKLIGHTS), device.as_deref())
+}
 
-    let first = entries.next()?;
-
-    Some(first.path())
+fn find_selected(backlights: &Path, device: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let mut entries = fs::read_dir(backlights).ok()?.flatten();
+    let selected = match device.filter(|name| !name.is_empty()) {
+        Some(name) => entries.find(|entry| entry.file_name() == name),
+        None => entries.next(),
+    };
+    selected.map(|entry| entry.path())
 }
 
 fn read(folder: &Path, name: &str) -> u64 {
     let text = fs::read_to_string(folder.join(name)).unwrap_or_default();
 
     text.trim().parse().unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn selected_panel_reports_its_brightness_on_a_dual_gpu_laptop() {
+        let root = std::env::temp_dir().join(format!("amane-backlight-{}", std::process::id()));
+        for (name, current, max) in [
+            ("nvidia_0", "100", "100"),
+            ("amdgpu_bl1", "320000", "400000"),
+        ] {
+            let folder = root.join(name);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("brightness"), current).unwrap();
+            fs::write(folder.join("max_brightness"), max).unwrap();
+        }
+        let mut brightness = Brightness {
+            path: find_selected(&root, Some(OsStr::new("amdgpu_bl1"))),
+            ..Brightness::default()
+        };
+        brightness.update();
+        assert_eq!(brightness.percent(), 80);
+        assert_eq!(brightness.path, Some(root.join("amdgpu_bl1")));
+        let mut gpu = Brightness {
+            path: find_selected(&root, Some(OsStr::new("nvidia_0"))),
+            ..Brightness::default()
+        };
+        gpu.update();
+        assert_eq!(gpu.percent(), 100);
+        assert_eq!(gpu.path, Some(root.join("nvidia_0")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unknown_selected_device_does_not_control_another_backlight() {
+        let root =
+            std::env::temp_dir().join(format!("amane-backlight-missing-{}", std::process::id()));
+        fs::create_dir_all(root.join("nvidia_0")).unwrap();
+        assert_eq!(
+            find_selected(&root, Some(OsStr::new("not-installed"))),
+            None
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }

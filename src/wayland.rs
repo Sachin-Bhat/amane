@@ -198,6 +198,11 @@ impl WaylandApp {
             self.event_loop
                 .dispatch(None, &mut self.state)
                 .expect("failed to dispatch events");
+            if let Some(error) = self.state.connection.protocol_error() {
+                eprintln!("amane: Wayland connection lost: {error}");
+                break;
+            }
+            self.state.recreate_hidden_layers();
         }
     }
 }

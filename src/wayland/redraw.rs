@@ -25,7 +25,7 @@ impl OpenWindow {
         self.update_surface(&content);
 
         // 0 until the compositor configures the window, and again while it is hidden
-        if self.width == 0 || self.height == 0 {
+        if self.recreate_hidden || self.width == 0 || self.height == 0 {
             return;
         }
 

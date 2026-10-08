@@ -88,10 +88,10 @@ impl OpenWindow {
     }
 
     fn hide(&mut self) {
-        // taking the buffer away unmaps the window and gives back its reserved space
-        self.role.wl_surface().attach(None, 0, 0);
-
-        self.role.commit();
+        // Null-buffer unmapping discards configure serials while the toolkit
+        // may still have queued events to acknowledge. Retire the role instead,
+        // after dispatching this batch; a fresh hidden surface can show later.
+        self.recreate_hidden = true;
 
         // nothing is drawn until showing the window brings a new configure
         self.width = 0;
