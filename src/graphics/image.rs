@@ -22,6 +22,7 @@ const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 const JPEG_SIGNATURE: [u8; 3] = [0xFF, 0xD8, 0xFF];
 
 // rgba pixels with plain, not premultiplied, alpha
+#[derive(Clone, PartialEq)]
 pub struct Bitmap {
     width: u32,
     height: u32,
@@ -31,6 +32,24 @@ pub struct Bitmap {
 }
 
 impl Bitmap {
+    pub fn from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let length = usize::try_from(width)
+            .ok()?
+            .checked_mul(usize::try_from(height).ok()?)?
+            .checked_mul(4)?;
+        if pixels.len() != length {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            pixels: Arc::new(pixels),
+        })
+    }
+
     // one clear pixel, for a texture slot that has to hold something
     pub fn empty() -> Self {
         Self {
@@ -87,6 +106,14 @@ pub fn load(path: &Path, cover: Option<(u32, u32)>, blur: u32) -> Option<Arc<Bit
     changes::note_read(TypeId::of::<Decoded>());
 
     None
+}
+
+pub(crate) fn prepare(bitmap: Bitmap, cover: Option<(u32, u32)>, blur: u32) -> Bitmap {
+    let bitmap = match cover {
+        Some((width, height)) => shrink::to_cover(bitmap, width, height),
+        None => bitmap,
+    };
+    soften::soften(bitmap, blur)
 }
 
 fn decode(key: Key) {

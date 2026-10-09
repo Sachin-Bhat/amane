@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::animation::moving;
-use crate::graphics::{Area, Corners, Renderer, image};
+use crate::graphics::{Area, Corners, Renderer};
 use crate::input::Target;
 use crate::style::Kind;
 use crate::{Fill, Image, Radius, Size, Widget};
@@ -117,7 +117,7 @@ fn paint(rectangle: &Rectangle, renderer: &mut Renderer, area: Area, radius: Cor
 
 fn paint_image(fill: &Image, renderer: &mut Renderer, area: Area, radius: Corners) {
     // still decoding, or unreadable
-    let Some(image) = image::load(&fill.path, fill.thumbnail, fill.blur) else {
+    let Some(image) = fill.bitmap() else {
         return;
     };
 
